@@ -51,7 +51,6 @@ async def take_browser_action(state: CUAState, config: RunnableConfig) -> Dict[s
     def handle_page_event(newPage: Page):
         nonlocal page
         page = newPage
-        print("new page", page.url)
 
     current_context.on("page", handle_page_event)
 
