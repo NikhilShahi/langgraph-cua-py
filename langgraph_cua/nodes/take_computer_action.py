@@ -6,9 +6,10 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.config import get_stream_writer
 from openai.types.responses.response_computer_tool_call import ResponseComputerToolCall
 from scrapybara.types import ComputerResponse, InstanceGetStreamUrlResponse
+from hyperbrowser.models import Coordinate
 
 from ..types import CUAState, get_configuration_with_defaults
-from ..utils import get_instance, is_computer_tool_call
+from ..utils import get_instance, is_computer_tool_call, get_hyperbrowser_client
 
 # Copied from the OpenAI example repository
 # https://github.com/openai/openai-cua-sample-app/blob/eb2d58ba77ffd3206d3346d6357093647d29d99c/computers/scrapybara.py#L10
@@ -61,12 +62,20 @@ def take_computer_action(state: CUAState, config: RunnableConfig) -> Dict[str, A
     instance_id = state.get("instance_id")
     if not instance_id:
         raise ValueError("Instance ID not found in state.")
-    instance = get_instance(instance_id, config)
 
     configuration = get_configuration_with_defaults(config)
+    provider = configuration.get("provider")
     environment = configuration.get("environment")
     auth_state_id = configuration.get("auth_state_id")
     authenticated_id = state.get("authenticated_id")
+
+    if provider == "scrapybara":
+        instance = get_instance(instance_id, config)
+    elif provider == "hyperbrowser":
+        client = get_hyperbrowser_client(configuration.get("hyperbrowser_api_key"))
+        instance = client.sessions.get(instance_id)
+    else:
+        raise ValueError(f"Unknown provider: {provider}")
 
     if (
         environment == "web"
@@ -83,8 +92,13 @@ def take_computer_action(state: CUAState, config: RunnableConfig) -> Dict[str, A
     if not stream_url:
         # If the stream_url is not yet defined in state, fetch it, then write to the custom stream
         # so that it's made accessible to the client (or whatever is reading the stream) before any actions are taken.
-        stream_url_response: InstanceGetStreamUrlResponse = instance.get_stream_url()
-        stream_url = stream_url_response.stream_url
+        if provider == "scrapybara":
+            stream_url_response: InstanceGetStreamUrlResponse = instance.get_stream_url()
+            stream_url = stream_url_response.stream_url
+        elif provider == "hyperbrowser":
+            stream_url = instance.live_url
+        else:
+            raise ValueError(f"Unknown provider: {provider}")
 
         writer = get_stream_writer()
         writer({"stream_url": stream_url})
@@ -98,56 +112,116 @@ def take_computer_action(state: CUAState, config: RunnableConfig) -> Dict[str, A
         action_type = action.get("type")
 
         if action_type == "click":
-            computer_response = instance.computer(
-                action="click_mouse",
-                button="middle" if action.get("button") == "wheel" else action.get("button"),
-                coordinates=[action.get("x"), action.get("y")],
-            )
+            if provider == "scrapybara":
+                computer_response = instance.computer(
+                    action="click_mouse",
+                    button="middle" if action.get("button") == "wheel" else action.get("button"),
+                    coordinates=[action.get("x"), action.get("y")],
+                )
+            elif provider == "hyperbrowser":
+                computer_response = client.computer_action.click(
+                    instance,
+                    x=action.get("x"),
+                    y=action.get("y"),
+                    button="middle" if action.get("button") == "wheel" else action.get("button"),
+                    return_screenshot=True,
+                )
         elif action_type == "double_click":
-            computer_response = instance.computer(
-                action="click_mouse",
-                button="left",
-                coordinates=[action.get("x"), action.get("y")],
-                num_clicks=2,
-            )
+            if provider == "scrapybara":
+                computer_response = instance.computer(
+                    action="click_mouse",
+                    button="left",
+                    coordinates=[action.get("x"), action.get("y")],
+                    num_clicks=2,
+                )
+            elif provider == "hyperbrowser":
+                computer_response = client.computer_action.click(
+                    instance,
+                    x=action.get("x"),
+                    y=action.get("y"),
+                    button="left",
+                    num_clicks=2,
+                    return_screenshot=True,
+                )
         elif action_type == "drag":
-            computer_response = instance.computer(
-                action="drag_mouse",
-                path=[[point.get("x"), point.get("y")] for point in action.get("path")],
-            )
+            if provider == "scrapybara":
+                computer_response = instance.computer(
+                    action="drag_mouse",
+                    path=[[point.get("x"), point.get("y")] for point in action.get("path")],
+                )
+            elif provider == "hyperbrowser":
+                computer_response = client.computer_action.drag(
+                    instance,
+                    path=[
+                        Coordinate(x=point.get("x"), y=point.get("y"))
+                        for point in action.get("path")
+                    ],
+                    return_screenshot=True,
+                )
         elif action_type == "keypress":
             mapped_keys = [
                 CUA_KEY_TO_SCRAPYBARA_KEY.get(key.lower(), key.lower())
                 for key in action.get("keys")
             ]
-            computer_response = instance.computer(action="press_key", keys=mapped_keys)
+            if provider == "scrapybara":
+                computer_response = instance.computer(action="press_key", keys=mapped_keys)
+            elif provider == "hyperbrowser":
+                computer_response = client.computer_action.press_keys(
+                    instance, keys=mapped_keys, return_screenshot=True
+                )
         elif action_type == "move":
-            computer_response = instance.computer(
-                action="move_mouse", coordinates=[action.get("x"), action.get("y")]
-            )
+            if provider == "scrapybara":
+                computer_response = instance.computer(
+                    action="move_mouse", coordinates=[action.get("x"), action.get("y")]
+                )
+            elif provider == "hyperbrowser":
+                computer_response = client.computer_action.move_mouse(
+                    instance, x=action.get("x"), y=action.get("y"), return_screenshot=True
+                )
         elif action_type == "screenshot":
-            computer_response = instance.computer(action="take_screenshot")
+            if provider == "scrapybara":
+                computer_response = instance.computer(action="take_screenshot")
+            elif provider == "hyperbrowser":
+                computer_response = client.computer_action.screenshot(instance)
         elif action_type == "wait":
             # Sleep for 2000ms (2 seconds)
             time.sleep(2)
             # Take a screenshot after waiting
-            computer_response = instance.computer(action="take_screenshot")
+            if provider == "scrapybara":
+                computer_response = instance.computer(action="take_screenshot")
+            elif provider == "hyperbrowser":
+                computer_response = client.computer_action.screenshot(instance)
         elif action_type == "scroll":
-            computer_response = instance.computer(
-                action="scroll",
-                delta_x=action.get("scroll_x") // 20,
-                delta_y=action.get("scroll_y") // 20,
-                coordinates=[action.get("x"), action.get("y")],
-            )
+            if provider == "scrapybara":
+                computer_response = instance.computer(
+                    action="scroll",
+                    delta_x=action.get("scroll_x") // 20,
+                    delta_y=action.get("scroll_y") // 20,
+                    coordinates=[action.get("x"), action.get("y")],
+                )
+            elif provider == "hyperbrowser":
+                computer_response = client.computer_action.scroll(
+                    instance,
+                    x=action.get("x"),
+                    y=action.get("y"),
+                    scroll_x=action.get("scroll_x"),
+                    scroll_y=action.get("scroll_y"),
+                    return_screenshot=True,
+                )
         elif action_type == "type":
-            computer_response = instance.computer(action="type_text", text=action.get("text"))
+            if provider == "scrapybara":
+                computer_response = instance.computer(action="type_text", text=action.get("text"))
+            elif provider == "hyperbrowser":
+                computer_response = client.computer_action.type_text(
+                    instance, text=action.get("text"), return_screenshot=True
+                )
         else:
             raise ValueError(f"Unknown computer action received: {action}")
 
         if computer_response:
             output_content = {
                 "type": "input_image",
-                "image_url": f"data:image/png;base64,{computer_response.base_64_image}",
+                "image_url": f"data:image/png;base64,{computer_response.base_64_image if provider == 'scrapybara' else computer_response.screenshot}",
             }
             tool_message = {
                 "role": "tool",

@@ -1,6 +1,7 @@
 import os
 from typing import Annotated, Any, Dict, List, Literal, Optional, TypedDict, Union
 
+from hyperbrowser.models import CreateSessionParams
 from langchain_core.messages import AnyMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import add_messages
@@ -64,8 +65,13 @@ class CUAConfiguration(TypedDict):
     """Configuration for the Computer Use Agent.
 
     Attributes:
+        provider: The provider to use for the agent.
         scrapybara_api_key: The API key to use for Scrapybara.
             This can be provided in the configuration, or set as an environment variable (SCRAPYBARA_API_KEY).
+        hyperbrowser_api_key: The API key to use for Hyperbrowser.
+            This can be provided in the configuration, or set as an environment variable (HYPERBROWSER_API_KEY).
+        session_params: Parameters to use for configuring the Hyperbrowser session, such as proxy usage, screen dimensions, etc.
+            For more information on the available parameters, see the [Hyperbrowser API documentation](https://docs.hyperbrowser.ai/sessions/overview/session-parameters)
         timeout_hours: The number of hours to keep the virtual machine running before it times out.
             Must be between 0.01 and 24. Default is 1.
         zdr_enabled: Whether or not Zero Data Retention is enabled in the user's OpenAI account. If True,
@@ -79,7 +85,12 @@ class CUAConfiguration(TypedDict):
             be passed as a system message
     """
 
+    provider: Optional[Literal["scrapybara", "hyperbrowser"]] = (
+        "scrapybara"  # The provider to use for the agent.
+    )
     scrapybara_api_key: Optional[str]  # API key for Scrapybara
+    hyperbrowser_api_key: Optional[str]  # API key for Hyperbrowser
+    session_params: Optional[CreateSessionParams]  # Parameters for the Hyperbrowser session
     timeout_hours: Optional[float]  # Timeout in hours (0.01-24, default: 1)
     zdr_enabled: Optional[bool]  # True/False for whether or not ZDR is enabled.
     auth_state_id: Optional[str]  # The ID of the authentication state.
@@ -101,11 +112,18 @@ def get_configuration_with_defaults(config: RunnableConfig) -> Dict[str, Any]:
     """
 
     configurable_fields = config.get("configurable", {})
+    provider = configurable_fields.get("provider", "scrapybara")
     scrapybara_api_key = (
         configurable_fields.get("scrapybara_api_key")
         or config.get("scrapybara_api_key")
         or os.environ.get("SCRAPYBARA_API_KEY")
     )
+    hyperbrowser_api_key = (
+        configurable_fields.get("hyperbrowser_api_key")
+        or config.get("hyperbrowser_api_key")
+        or os.environ.get("HYPERBROWSER_API_KEY")
+    )
+    session_params = configurable_fields.get("session_params", None)
     timeout_hours = configurable_fields.get("timeout_hours", 1)
     zdr_enabled = configurable_fields.get("zdr_enabled", False)
     auth_state_id = configurable_fields.get("auth_state_id", None)
@@ -113,7 +131,10 @@ def get_configuration_with_defaults(config: RunnableConfig) -> Dict[str, Any]:
     prompt = configurable_fields.get("prompt", None)
 
     return {
+        "provider": provider,
         "scrapybara_api_key": scrapybara_api_key,
+        "hyperbrowser_api_key": hyperbrowser_api_key,
+        "session_params": session_params,
         "timeout_hours": timeout_hours,
         "zdr_enabled": zdr_enabled,
         "auth_state_id": auth_state_id,

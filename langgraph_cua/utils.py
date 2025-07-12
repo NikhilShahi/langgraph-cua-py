@@ -3,6 +3,7 @@ from typing import Any, Union
 from langchain_core.runnables import RunnableConfig
 from scrapybara import Scrapybara
 from scrapybara.client import BrowserInstance, UbuntuInstance, WindowsInstance
+from hyperbrowser import Hyperbrowser
 
 from .types import get_configuration_with_defaults
 
@@ -23,6 +24,25 @@ def get_scrapybara_client(api_key: str) -> Scrapybara:
             "or set it as an environment variable (SCRAPYBARA_API_KEY)"
         )
     client = Scrapybara(api_key=api_key)
+    return client
+
+
+def get_hyperbrowser_client(api_key: str) -> Hyperbrowser:
+    """
+    Gets the Hyperbrowser client, using the API key provided.
+
+    Args:
+        api_key: The API key for Hyperbrowser.
+
+    Returns:
+        The Hyperbrowser client.
+    """
+    if not api_key:
+        raise ValueError(
+            "Hyperbrowser API key not provided. Please provide one in the configurable fields, "
+            "or set it as an environment variable (HYPERBROWSER_API_KEY)"
+        )
+    client = Hyperbrowser(api_key=api_key)
     return client
 
 
